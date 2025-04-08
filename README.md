@@ -59,7 +59,8 @@ Borrowing when at capacity:
 ```go
 // Borrow again
 //
-// Since we set our pool's capacity to 1, we get a context.DeadlineExceeded
+// Since we set our pool's capacity to 1 and haven't returned the instance we
+// borrowed above, we get a context.DeadlineExceeded
 ctx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
 defer cancel()
 b, err = p.Borrow(ctx)
