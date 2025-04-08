@@ -18,7 +18,7 @@ type X struct {
 
 func TestPool(t *testing.T) {
 	// Init a pool
-	p, err := NewPool(3, func(x *X) (*X, error) {
+	p, err := New(3, func(x *X) (*X, error) {
 		x = new(X)
 		x.slice = make([]byte, 0, 32)
 		return x, nil
@@ -28,7 +28,7 @@ func TestPool(t *testing.T) {
 	p.SetCap(3)                            // Set the capacity limit to the initial size
 
 	// Register a deinitializer
-	p.RegisterDeinit(func(x *X) (*X, error) {
+	p.WithPost(func(x *X) (*X, error) {
 		if len(x.slice) == 0 {
 			return x, nil
 		}
@@ -66,6 +66,7 @@ func TestPool(t *testing.T) {
 
 	// Deadline (at capacity)
 	bs, err = p.Borrow(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Error(t, err)
 
 	// Bring one back!

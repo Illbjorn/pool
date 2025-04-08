@@ -4,34 +4,30 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
+	"sync/atomic"
 )
 
 type (
 	Constructor[T any] func(*T) (*T, error)
-	Init[T any]        func(*T) (*T, error)
-	Deinit[T any]      func(*T) (*T, error)
+	Pre[T any]         func(*T) (*T, error)
+	Post[T any]        func(*T) (*T, error)
 )
 
-func NewPool[T any](initialSize int, initializer Constructor[T]) (*Pool[T], error) {
-	if initialSize < 0 {
-		initialSize = 0
-	}
-
+func New[T any](initialSize uint32, constructor Constructor[T]) (*Pool[T], error) {
 	pool := new(Pool[T])
-
+	pool.mu = new(sync.Mutex)
+	pool.cap = &initialSize
 	pool.containers = make([]*Container[T], initialSize)
+
+	pool.mu.Lock()
 	for i := range initialSize {
-		next, err := initializer(new(T))
+		next, err := constructor(new(T))
 		if err != nil {
 			return nil, err
 		}
-
-		pool.containers[i] = &Container[T]{
-			mu:   new(sync.Mutex),
-			item: next,
-		}
+		pool.containers[i] = newContainer(next)
 	}
+	pool.mu.Unlock()
 
 	return pool, nil
 }
@@ -49,37 +45,69 @@ func MustNew[T any](initialSize uint32, initializer Constructor[T]) *Pool[T] {
  *----------------------------------------------------------------------------*/
 
 type Pool[T any] struct {
-	containers []*Container[T]
-	construct  Constructor[T] // Called once when new items are created
-	setup      Init[T]        // Called during each call to Borrow when an item is loaned out
-	teardown   Deinit[T]      // Called each time a borrowed item is released
-	size, cap  int
+	containers  []*Container[T]
+	constructor Constructor[T] // Called once when new items are created
+	pre         Pre[T]         // Called during each call to Borrow when an item is loaned out
+	post        Post[T]        // Called each time a borrowed item is released
+	cap         *uint32
+	mu          *sync.Mutex
 }
 
-func (p *Pool[T]) SetCap(i int) *Pool[T] {
-	p.cap = i
-	return p
+func (p *Pool[T]) SetCap(i uint32) {
+	atomic.StoreUint32(p.cap, i)
 }
 
-func (p *Pool[T]) RegisterInit(handler Init[T]) {
-	p.setup = handler
+func (p *Pool[T]) WithPre(handler Pre[T]) {
+	p.pre = handler
 }
 
-func (p *Pool[T]) RegisterDeinit(handler Deinit[T]) {
-	p.teardown = handler
+func (p *Pool[T]) applyPre(v *T) (*T, error) {
+	if p.pre != nil {
+		return p.pre(v)
+	}
+	return v, nil
 }
 
-func (p *Pool[T]) RegisterConstructor(handler Constructor[T]) {
-	p.construct = handler
+func (p *Pool[T]) WithPost(handler Post[T]) {
+	p.post = handler
+}
+
+func (p *Pool[T]) applyPost(v *T) (*T, error) {
+	if p.post == nil {
+		return v, nil
+	}
+	return p.post(v)
+}
+
+func (p *Pool[T]) WithConstructor(handler Constructor[T]) {
+	if handler == nil {
+		return
+	}
+	p.constructor = handler
+}
+
+func (p *Pool[T]) construct() (*T, error) {
+	// Construct a new Container[T] with a new `T`
+	ct := newContainer(new(T))
+	ct.Lock()
+
+	p.mu.Lock()
+	p.containers = append(p.containers, ct)
+	p.mu.Unlock()
+
+	// If we don't have a constructor, we're done here
+	if p.constructor == nil {
+		return ct.item, nil
+	}
+
+	// If we do have a constructor, construct and return the result
+	return p.constructor(ct.item)
 }
 
 func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
 	for _, container := range p.containers {
-		if container.mu.TryLock() {
-			if p.setup == nil {
-				return container.item, nil
-			}
-			return p.setup(container.item)
+		if container.TryLock() {
+			return p.applyPre(container.item)
 		}
 	}
 
@@ -87,13 +115,11 @@ func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
 	case <-ctx.Done():
 		return nil, context.DeadlineExceeded
 	default:
-		// If we have capacity headroom, just spin up a new one
-		if len(p.containers) < p.cap {
-			return p.new()
+		// If we have capacity, just spin up a new one
+		if len(p.containers) < int(*p.cap) {
+			return p.construct()
 		}
-
 		// Try again until we hit the context deadline or a container frees up
-		<-time.After(1 * time.Millisecond)
 		return p.Borrow(ctx)
 	}
 }
@@ -109,42 +135,40 @@ func (p *Pool[T]) MustBorrow(ctx context.Context) *T {
 var ErrNotFound = errors.New("uhh, we didn't sell you that?")
 
 func (p *Pool[T]) Return(item *T) (err error) {
-	for _, v := range p.containers {
-		if v.item == item {
-			if p.teardown != nil {
-				v.item, err = p.teardown(v.item)
-			}
-			v.mu.Unlock()
+	for _, container := range p.containers {
+		if container.item == item {
+			container.Unlock()
+			container.item, err = p.applyPost(container.item)
 			return err
 		}
 	}
 	return ErrNotFound
 }
 
-func (p *Pool[T]) new() (*T, error) {
-	// Init the container item
-	item, err := p.construct(new(T))
-	if err != nil {
-		return nil, err
-	}
-
-	// Init the container and lock it
-	ct := &Container[T]{
-		item: item,
-		mu:   new(sync.Mutex),
-	}
-	ct.mu.Lock()
-
-	p.containers = append(p.containers, ct)
-
-	return ct.item, nil
-}
-
 /*------------------------------------------------------------------------------
  * Container
  *----------------------------------------------------------------------------*/
 
+func newContainer[T any](v *T) *Container[T] {
+	return &Container[T]{
+		item:   v,
+		locked: new(atomic.Bool),
+	}
+}
+
 type Container[T any] struct {
-	mu   *sync.Mutex
-	item *T
+	locked *atomic.Bool
+	item   *T
+}
+
+func (ct *Container[T]) TryLock() bool {
+	return ct.locked.CompareAndSwap(false, true)
+}
+
+func (ct *Container[T]) Lock() {
+	ct.locked.Store(true)
+}
+
+func (ct *Container[T]) Unlock() {
+	ct.locked.Store(false)
 }
