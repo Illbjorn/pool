@@ -1,0 +1,86 @@
+version: '3'
+
+silent: true
+interval: 250ms
+
+vars:
+  pkg_name: github.com/illbjorn/pool
+  version_path: .github/VERSION
+  version:
+    sh: cat '{{ .version_path }}'
+
+tasks:
+  version:
+    aliases: [v]
+    desc: Prints the current repository version from '{{ .version_path }}' to the console.
+    silent: true
+    interactive: true
+    cmd: echo '{{ .version }}'
+
+  create-git-tag:
+    internal: true
+    requires:
+      vars: [tag]
+    cmd: git tag '{{ .tag }}'
+
+  push-tag-ref:
+    internal: true
+    requires:
+      vars: [tag]
+    cmd: git push origin '{{ .tag }}'
+
+  update-go-module-index:
+    internal: true
+    requires:
+      vars: [tag]
+    cmd: GOPROXY=proxy.golang.org go list -m '{{ .pkg_name }}@{{ .tag }}'
+
+  release:
+    aliases: [r]
+    desc: Creates a Git tag from '{{ .version_path }}' and pushes to that ref.
+    vars:
+      tag: 'v{{ .version }}'
+    cmds:
+      - task: create-git-tag
+        vars:
+          tag: '{{ .tag }}'
+      - task: push-tag-ref
+        vars:
+          tag: '{{ .tag }}'
+      - task: update-go-module-index
+        vars:
+          tag: '{{ .tag }}'
+
+  # Task: Bump
+  #
+  # >> Examples
+  #     $ task bump
+  #     Incrementing version ['0.1.4']=>['0.1.5'].
+  #
+  #     $ task bump s=minor
+  #     Incrementing version ['0.1.4']=>['0.2.0'].
+  #
+  #     $ task bump s=major
+  #     Incrementing version ['0.1.4']=>['1.0.0'].
+  #
+  bump:
+    aliases: [b]
+    desc: Bumps the provided segment of the semver string at {{ .version_path }}.
+    vars:
+      segment: '{{ if .s }}{{ .s }}{{ else }}patch{{ end }}'
+    env:
+      version_path: '{{ .version_path }}'
+      segment: '{{ .segment }}'
+    cmd: .github/scripts/bump.sh
+
+  test:
+    aliases: [t]
+    desc: Executes all Go unit tests.
+    vars:
+      flags: '{{ if .debug }}-v -gcflags="-N -l"{{ end }}'
+    cmd: go test -count=1 {{ .flags }} .
+
+  lint:
+    aliases: [l]
+    desc: Performs linting via Golangci-lint using the default config.
+    cmd: golangci-lint run
