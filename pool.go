@@ -13,17 +13,25 @@ type (
 	Post[T any]        func(*T) (*T, error)
 )
 
-func New[T any](initialSize uint32, constructor Constructor[T]) (*Pool[T], error) {
+func New[T any](capacity uint32, constructor Constructor[T]) (*Pool[T], error) {
+	if capacity == 0 {
+		capacity = 1
+	}
+
 	pool := new(Pool[T])
 	pool.mu = new(sync.Mutex)
-	pool.cap = &initialSize
-	pool.containers = make([]*Container[T], initialSize)
+	pool.cap = &capacity
+	pool.containers = make([]*Container[T], capacity)
 
 	pool.mu.Lock()
-	for i := range initialSize {
-		next, err := constructor(new(T))
-		if err != nil {
-			return nil, err
+	for i := range capacity {
+		next := new(T)
+		if constructor != nil {
+			var err error
+			next, err = constructor(next)
+			if err != nil {
+				return nil, err
+			}
 		}
 		pool.containers[i] = newContainer(next)
 	}
@@ -32,8 +40,8 @@ func New[T any](initialSize uint32, constructor Constructor[T]) (*Pool[T], error
 	return pool, nil
 }
 
-func MustNew[T any](initialSize uint32, initializer Constructor[T]) *Pool[T] {
-	p, err := New(initialSize, initializer)
+func MustNew[T any](capacity uint32, initializer Constructor[T]) *Pool[T] {
+	p, err := New(capacity, initializer)
 	if err != nil {
 		panic(err)
 	}
