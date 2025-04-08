@@ -36,6 +36,14 @@ func NewPool[T any](initialSize int, initializer Constructor[T]) (*Pool[T], erro
 	return pool, nil
 }
 
+func MustNew[T any](initialSize uint32, initializer Constructor[T]) *Pool[T] {
+	p, err := New(initialSize, initializer)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
 /*------------------------------------------------------------------------------
  * Pool
  *----------------------------------------------------------------------------*/
@@ -88,6 +96,14 @@ func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
 		<-time.After(1 * time.Millisecond)
 		return p.Borrow(ctx)
 	}
+}
+
+func (p *Pool[T]) MustBorrow(ctx context.Context) *T {
+	v, err := p.Borrow(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 var ErrNotFound = errors.New("uhh, we didn't sell you that?")
