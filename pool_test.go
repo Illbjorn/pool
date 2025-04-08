@@ -2,6 +2,9 @@ package pool
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,4 +80,66 @@ func TestPool(t *testing.T) {
 
 	// Confirm once we get it back the data is empty (deinit func did its job)
 	require.Equal(t, 0, len(bs3.slice))
+}
+
+type SyncMutex struct {
+	i  int
+	mu *sync.Mutex
+}
+
+type AtomicBool struct {
+	i  int
+	mu *atomic.Bool
+}
+
+func BenchmarkSyncMutex(b *testing.B) {
+	sm := new(SyncMutex)
+	sm.mu = new(sync.Mutex)
+	wg := new(sync.WaitGroup)
+
+	fn := func(wg *sync.WaitGroup) {
+		sm.mu.Lock()
+		sm.i += 1
+		sm.mu.Unlock()
+		wg.Done()
+	}
+
+	for i := 1; i < 8; i++ {
+		n := 1 << i
+		title := fmt.Sprintf("sync-mutex/%d_concurrent_ops", n)
+		runN(b, title, n, wg, fn)
+	}
+}
+
+func BenchmarkAtomicBool(b *testing.B) {
+	const concurrentOps = 256
+
+	ab := new(AtomicBool)
+	ab.mu = new(atomic.Bool)
+	wg := new(sync.WaitGroup)
+
+	fn := func(wg *sync.WaitGroup) {
+		ab.mu.CompareAndSwap(false, true)
+		ab.i += 1
+		ab.mu.CompareAndSwap(true, false)
+		wg.Done()
+	}
+
+	for i := 1; i < 8; i++ {
+		n := 1 << i
+		title := fmt.Sprintf("atomic-bool/%d_concurrent_ops", n)
+		runN(b, title, n, wg, fn)
+	}
+}
+
+func runN(b *testing.B, title string, n int, wg *sync.WaitGroup, fn func(wg *sync.WaitGroup)) {
+	b.Run(title, func(b *testing.B) {
+		for b.Loop() {
+			for range n {
+				wg.Add(1)
+				go fn(wg)
+			}
+			wg.Wait()
+		}
+	})
 }
