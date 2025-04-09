@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"gotest.tools/v3/assert"
 )
 
 type X struct {
@@ -23,9 +22,9 @@ func TestPool(t *testing.T) {
 		x.slice = make([]byte, 0, 32)
 		return x, nil
 	})
-	require.NoError(t, err)                // Confirm it init'd clean
-	require.Equal(t, 3, len(p.containers)) // Confirm we have the expected initial size
-	p.SetCap(3)                            // Set the capacity limit to the initial size
+	assert.NilError(t, err)               // Confirm it init'd clean
+	assert.Equal(t, 3, len(p.containers)) // Confirm we have the expected initial size
+	p.SetCap(3)                           // Set the capacity limit to the initial size
 
 	// Register a deinitializer
 	p.WithPost(func(x *X) (*X, error) {
@@ -42,42 +41,41 @@ func TestPool(t *testing.T) {
 
 	// 1x
 	bs, err := p.Borrow(ctx)
-	require.NoError(t, err)
+	assert.NilError(t, err)
 	assert.Equal(t, 0, len(bs.slice))
 	assert.Equal(t, 32, cap(bs.slice))
 
 	// 2x
 	bs2, err := p.Borrow(ctx)
-	require.NoError(t, err)
-	assert.NotNil(t, bs2)
+	assert.NilError(t, err)
+	assert.Check(t, bs2 != nil)
 	assert.Equal(t, 0, len(bs.slice))
 	assert.Equal(t, 32, cap(bs.slice))
 
 	// 3x
 	bs3, err := p.Borrow(ctx)
-	require.NoError(t, err)
-	assert.NotNil(t, bs3)
+	assert.NilError(t, err)
+	assert.Check(t, bs3 != nil)
 	assert.Equal(t, 0, len(bs.slice))
 	assert.Equal(t, 32, cap(bs.slice))
 
 	// Write some data to the slice and make sure it gets cleaned up
 	bs3.slice = append(bs3.slice, []byte("Hello, world!")...)
-	require.Equal(t, "Hello, world!", string(bs3.slice))
+	assert.Equal(t, "Hello, world!", string(bs3.slice))
 
 	// Deadline (at capacity)
 	bs, err = p.Borrow(ctx)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// Bring one back!
 	err = p.Return(bs3)
-	assert.NoError(t, err)
+	assert.Check(t, err)
 
 	// Now rent another (this time should work)
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 	bs3, err = p.Borrow(ctx)
-	require.NoError(t, err)
+	assert.NilError(t, err)
 
 	// Confirm once we get it back the data is empty (deinit func did its job)
 	require.Equal(t, 0, len(bs3.slice))

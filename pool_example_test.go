@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/illbjorn/pool"
-	"github.com/stretchr/testify/assert"
+	"gotest.tools/v3/assert"
 )
 
 func TestPoolExample(t *testing.T) {
@@ -30,25 +30,25 @@ func TestPoolExample(t *testing.T) {
 
 	// Borrow a buffer
 	b, err := p.Borrow(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, b)
+	assert.Check(t, err)
+	assert.Check(t, b != nil)
 
 	b.WriteString("Hello, world!") // Write some data to it
-	assert.Equal(t, []byte("Hello, world!"), b.Bytes())
+	assert.DeepEqual(t, []byte("Hello, world!"), b.Bytes())
 
 	// Return it when we're done. This allows this buffer to be reused by future
 	// callers.
 	//
 	// Also, since we set `p.WithPost()`, the buffers been reset.
 	err = p.Return(b)
-	assert.NoError(t, err)
+	assert.Check(t, err)
 
 	// Borrow it again, confirm the data is gone
 	ctx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	b, err = p.Borrow(ctx)
-	assert.NoError(t, err)
-	assert.Empty(t, b.Bytes())
+	assert.Check(t, err)
+	assert.Equal(t, 0, len(b.Bytes()))
 
 	// Borrow again
 	//
@@ -66,7 +66,7 @@ func TestPoolExample(t *testing.T) {
 		ctx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
 		defer cancel()
 		b2, err := p.Borrow(ctx) // Success!
-		assert.NoError(t, err)
-		assert.NotNil(t, b2)
+		assert.Check(t, err)
+		assert.Check(t, b2 != nil)
 	}
 }
