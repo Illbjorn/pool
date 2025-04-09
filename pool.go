@@ -94,14 +94,46 @@ func (p *Pool[T]) WithConstructor(handler Constructor[T]) {
 	p.constructor = handler
 }
 
+func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
+	for {
+		if ct, err := p.borrow(); ct != nil {
+			return ct, err
+		} else if ct, err = p.construct(); ct != nil {
+			return ct, err
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, context.DeadlineExceeded
+		default:
+		}
+	}
+}
+
+func (p *Pool[T]) borrow() (*T, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, container := range p.containers {
+		if container.TryLock() {
+			return p.applyPre(container.item)
+		}
+	}
+	return nil, nil
+}
+
 func (p *Pool[T]) construct() (*T, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.containers) >= int(*p.cap) {
+		return nil, nil
+	}
+
 	// Construct a new Container[T] with a new `T`
 	ct := newContainer(new(T))
 	ct.Lock()
 
-	p.mu.Lock()
 	p.containers = append(p.containers, ct)
-	p.mu.Unlock()
 
 	// If we don't have a constructor, we're done here
 	if p.constructor == nil {
@@ -110,26 +142,6 @@ func (p *Pool[T]) construct() (*T, error) {
 
 	// If we do have a constructor, construct and return the result
 	return p.constructor(ct.item)
-}
-
-func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
-	for _, container := range p.containers {
-		if container.TryLock() {
-			return p.applyPre(container.item)
-		}
-	}
-
-	select {
-	case <-ctx.Done():
-		return nil, context.DeadlineExceeded
-	default:
-		// If we have capacity, just spin up a new one
-		if len(p.containers) < int(*p.cap) {
-			return p.construct()
-		}
-		// Try again until we hit the context deadline or a container frees up
-		return p.Borrow(ctx)
-	}
 }
 
 func (p *Pool[T]) MustBorrow(ctx context.Context) *T {
@@ -143,10 +155,12 @@ func (p *Pool[T]) MustBorrow(ctx context.Context) *T {
 var ErrNotFound = errors.New("uhh, we didn't sell you that?")
 
 func (p *Pool[T]) Return(item *T) (err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, container := range p.containers {
 		if container.item == item {
-			container.Unlock()
 			container.item, err = p.applyPost(container.item)
+			container.Unlock()
 			return err
 		}
 	}
