@@ -102,10 +102,8 @@ func (p *Pool[T]) Borrow(ctx context.Context) (*T, error) {
 			return ct, err
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil, context.DeadlineExceeded
-		default:
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 }
