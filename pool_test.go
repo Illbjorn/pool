@@ -1,8 +1,10 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,7 +80,51 @@ func TestPool(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Confirm once we get it back the data is empty (deinit func did its job)
-	require.Equal(t, 0, len(bs3.slice))
+	assert.Equal(t, 0, len(bs3.slice))
+}
+
+func TestPoolRace(t *testing.T) {
+	const expCap uint32 = 4
+
+	wg := new(sync.WaitGroup)
+	p := MustNew(3, func(t *bool) (*bool, error) {
+		return t, nil
+	})
+	p.SetCap(expCap)
+
+	// 64-rounds of 128 concurrent borrow attempts
+	for range 64 {
+		for range 128 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				item, err := p.Borrow(t.Context())
+				assert.NilError(t, err)
+				err = p.Return(item)
+				assert.NilError(t, err)
+			}()
+		}
+		wg.Wait()
+	}
+	assert.Equal(t, expCap, *p.cap)
+}
+
+func BenchmarkPool(b *testing.B) {
+	// Benchmark with 2^1 through 2^12 pool capacity
+	for i := 1; i < 13; i++ {
+		n := 1 << i
+		p := MustNew(uint32(n), func(t *bytes.Buffer) (*bytes.Buffer, error) {
+			return t, nil
+		})
+		b.Run("capacity_"+strconv.Itoa(n), func(b *testing.B) {
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					i, _ := p.Borrow(context.Background())
+					_ = p.Return(i)
+				}
+			})
+		})
+	}
 }
 
 type SyncMutex struct {
