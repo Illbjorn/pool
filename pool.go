@@ -8,7 +8,7 @@ import (
 )
 
 type (
-	Constructor[T any] func(*T) (*T, error)
+	Constructor[T any] func() (*T, error)
 	Pre[T any]         func(*T) (*T, error)
 	Post[T any]        func(*T) (*T, error)
 )
@@ -28,7 +28,7 @@ func New[T any](capacity uint32, constructor Constructor[T]) (*Pool[T], error) {
 		next := new(T)
 		if constructor != nil {
 			var err error
-			next, err = constructor(next)
+			next, err = constructor()
 			if err != nil {
 				return nil, err
 			}
@@ -139,7 +139,7 @@ func (p *Pool[T]) construct() (*T, error) {
 	}
 
 	// If we do have a constructor, construct and return the result
-	return p.constructor(ct.item)
+	return p.constructor()
 }
 
 func (p *Pool[T]) MustBorrow(ctx context.Context) *T {

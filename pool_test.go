@@ -19,8 +19,8 @@ type X struct {
 
 func TestPool(t *testing.T) {
 	// Init a pool
-	p, err := New(3, func(x *X) (*X, error) {
-		x = new(X)
+	p, err := New(3, func() (*X, error) {
+		x := new(X)
 		x.slice = make([]byte, 0, 32)
 		return x, nil
 	})
@@ -87,8 +87,8 @@ func TestPoolRace(t *testing.T) {
 	const expCap uint32 = 4
 
 	wg := new(sync.WaitGroup)
-	p := MustNew(3, func(t *bool) (*bool, error) {
-		return t, nil
+	p := MustNew(3, func() (*bool, error) {
+		return new(bool), nil
 	})
 	p.SetCap(expCap)
 
@@ -113,8 +113,8 @@ func BenchmarkPool(b *testing.B) {
 	// Benchmark with 2^1 through 2^12 pool capacity
 	for i := 1; i < 13; i++ {
 		n := 1 << i
-		p := MustNew(uint32(n), func(t *bytes.Buffer) (*bytes.Buffer, error) {
-			return t, nil
+		p := MustNew(uint32(n), func() (*bytes.Buffer, error) {
+			return bytes.NewBuffer(make([]byte, 0, 1024)), nil
 		})
 		b.Run("capacity_"+strconv.Itoa(n), func(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {

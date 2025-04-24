@@ -13,9 +13,8 @@ import (
 
 func TestPoolExample(t *testing.T) {
 	// Creates a `pool.Pool[bytes.Buffer]` with a maximum capacity of 1
-	p := pool.MustNew(1, func(b *bytes.Buffer) (*bytes.Buffer, error) {
-		b = bytes.NewBuffer(make([]byte, 0, 256))
-		return b, nil
+	p := pool.MustNew(1, func() (*bytes.Buffer, error) {
+		return bytes.NewBuffer(make([]byte, 0, 256)), nil
 	})
 
 	// Set a post-return handler to zero the buffer when we're done with it
