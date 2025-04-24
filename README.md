@@ -16,12 +16,11 @@ Create a pool of `bytes.Buffer`s:
 
 ```go
 // Creates a `pool.Pool[bytes.Buffer]` with a maximum capacity of 1
-p := pool.MustNew(1, func(b *bytes.Buffer) (*bytes.Buffer, error) {
-  b = bytes.NewBuffer(make([]byte, 0, 256))
-  return b, nil
+p := pool.MustNew(1, func() (*bytes.Buffer, error) {
+  return bytes.NewBuffer(make([]byte, 0, 256)), nil
 })
 
-// Set a post-return handler to zero the buffer when we return it
+// Set a post handler to zero the buffer when we return it
 p.WithPost(func(b *bytes.Buffer) (*bytes.Buffer, error) {
   b.Reset()
   return b, nil
@@ -42,7 +41,7 @@ assert.Equal(t, []byte("Hello, world!"), b.Bytes())
 // Return it when we're done. This allows this buffer to be reused by future
 // callers.
 //
-// Also, since we set `p.WithPost()`, the buffers been reset.
+// Also, since we set `p.WithPost()` earlier, the buffers been reset.
 err = p.Return(b)
 assert.NoError(t, err)
 
